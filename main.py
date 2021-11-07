@@ -5,11 +5,16 @@ from PySide6.QtCore import *
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 import MetaTrader5 as mt5
+from datetime import datetime
+import numpy as np
+import pandas as pd
+from tapy import Indicators
 
 # подключимся к MetaTrader 5
 if not mt5.initialize():
     print("initialize() failed")
     mt5.shutdown()
+
 
 pairs = [
     "EURUSDrfd",
@@ -60,6 +65,7 @@ C = 4
 
 
 def detect_reverse_bar(last_bar):
+    # print(last_bar)
     price_open = last_bar[O]
     high = last_bar[H]
     low = last_bar[L]
@@ -72,9 +78,9 @@ def detect_reverse_bar(last_bar):
     bear_high = low + part
     bear_low = low
 
-    if bear_high <= price_open <= bull_high and bull_low <= close <= bull_high:
+    if price_open < close and bull_low <= close <= bull_high:
         return 1
-    elif bear_low <= price_open <= bull_low and bear_low <= close <= bear_high:
+    elif price_open > close and bear_low <= close <= bear_high:
         return -1
     else:
         return 0
@@ -137,12 +143,16 @@ class MyWidget(QtWidgets.QWidget):
                 else:
                     meta_frame = mt5.TIMEFRAME_W1
                     text = "W1"
-                detected = detect_reverse_bar(mt5.copy_rates_from_pos(pair, meta_frame, 0, 1)[0])
 
-                if detected == 1:
+                arr = mt5.copy_rates_from_pos(pair, meta_frame, 0, 200)
+                detected = detect_reverse_bar(arr[-1])
+                # print(text)
+                # print(detected)
+
+                if detected == 1 and self.isGoodBull(arr):
                     item.setBackground(QtGui.QColor("green"))
                     item.setText(text)
-                elif detected == -1:
+                elif detected == -1 and self.isGoodBear(arr):
                     item.setBackground(QtGui.QColor("red"))
                     item.setText(text)
                 else:
@@ -150,12 +160,38 @@ class MyWidget(QtWidgets.QWidget):
                     item.setText("")
 
 
+    def isGoodBull(self, period):
+        prep = []
+        for line in period:
+            prep.append([datetime.fromtimestamp(line[0].item()), line[1], line[2], line[3], line[4], line[5]])
+        df = pd.DataFrame(np.array(prep), columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+        i = Indicators(df)
+        i.alligator()
+        df = i.df
+        d = df.iloc[-1]
+        alligator_min = min(d['alligator_jaws'], d['alligator_teeth'], d['alligator_lips'])
+        # print(alligator_min)
+        if alligator_min >= period[-1][H]:
+            return True
+        else:
+            return False
 
-        # row_1 = ["1", "2", "3", "4", "", "6"]
-        # self.addTableRow(row_1)
-        # self.table.setRowHeight(0, 1)
-        # print(type(self.table.item(0, 0).setBackground(QtGui.QColor("blue"))))
-        pass
+
+    def isGoodBear(self, period):
+        prep = []
+        for line in period:
+            prep.append([datetime.fromtimestamp(line[0].item()), line[1], line[2], line[3], line[4], line[5]])
+        df = pd.DataFrame(np.array(prep), columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+        i = Indicators(df)
+        i.alligator()
+        df = i.df
+        d = df.iloc[-1]
+        alligator_max = max(d['alligator_jaws'], d['alligator_teeth'], d['alligator_lips'])
+        if alligator_max <= period[-1][L]:
+            return True
+        else:
+            return False
+
 
     def addTableRow(self, row_data):
         row = self.table.rowCount()
@@ -166,6 +202,7 @@ class MyWidget(QtWidgets.QWidget):
             self.table.setItem(row, col, cell)
             col += 1
         self.table.setRowHeight(row, 1)
+
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication([])
